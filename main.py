@@ -4,7 +4,6 @@ from pydantic import BaseModel
 from pydantic_settings import BaseSettings
 from groq import Groq
 from typing import List, Optional
-import os
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -36,30 +35,30 @@ app.add_middleware(
 
 client = Groq(api_key=settings.groq_api_key)
 
-SYSTEM_PROMPT = """Você é o Assistente Virtual da SI Soluções Imobiliárias, uma imobiliária moderna focada em resultados.
+BASE_SYSTEM_PROMPT = """Você é o Assistente Virtual da SI Soluções Imobiliárias, especialista em vendas imobiliárias.
 
-Seu objetivo é ajudar os corretores e gestores a:
-- Entender e gerenciar os leads do sistema
-- Tirar dúvidas sobre o processo de vendas imobiliárias
-- Dar dicas sobre como qualificar e avançar leads no funil
-- Orientar sobre melhores práticas de atendimento ao cliente imobiliário
+Seu objetivo é ajudar corretores e gestores a:
+- Gerenciar e entender os leads do sistema
+- Dar dicas práticas sobre o processo de vendas imobiliárias
+- Orientar sobre como qualificar e avançar leads no funil
+- Responder perguntas sobre os dados atuais dos leads quando fornecidos
 
-O funil de vendas da SI tem os seguintes status:
-- NOVO: Lead acabou de entrar, não foi contatado ainda
-- EM_CONTATO: Primeiro contato realizado, aguardando retorno
-- QUALIFICADO: Lead tem perfil e budget confirmados
+O funil de vendas da SI:
+- NOVO: Lead acabou de entrar, ainda não contatado
+- EM_CONTATO: Primeiro contato realizado
+- QUALIFICADO: Budget e perfil confirmados
 - PROPOSTA: Proposta formal enviada
-- FECHADO: Negócio concluído com sucesso
+- FECHADO: Negócio concluído
 - PERDIDO: Lead desistiu ou foi para concorrente
 
 Dicas de conversão:
-- De NOVO para EM_CONTATO: Contato em até 5 minutos aumenta 21x a chance de qualificação
-- De EM_CONTATO para QUALIFICADO: Pergunte sobre budget, prazo e tipo de imóvel desejado
-- De QUALIFICADO para PROPOSTA: Apresente 3 opções de imóveis que se encaixem no perfil
-- De PROPOSTA para FECHADO: Follow-up dentro de 48h após o envio da proposta
+- NOVO → EM_CONTATO: Contato nos primeiros 5 minutos aumenta 21x a chance
+- EM_CONTATO → QUALIFICADO: Pergunte budget, prazo e tipo de imóvel
+- QUALIFICADO → PROPOSTA: Apresente 3 opções que se encaixem no perfil
+- PROPOSTA → FECHADO: Follow-up em até 48h após envio da proposta
 
-Seja sempre profissional, objetivo e motivador. Responda em português brasileiro.
-Se não souber algo específico sobre os dados do sistema, diga que o usuário pode verificar no painel."""
+Seja objetivo, profissional e motivador. Responda sempre em português brasileiro.
+Use os dados do sistema fornecidos quando o usuário perguntar sobre leads específicos."""
 
 
 class ChatMessage(BaseModel):
@@ -71,6 +70,7 @@ class ChatRequest(BaseModel):
     message: str
     history: Optional[List[ChatMessage]] = []
     user_id: Optional[str] = None
+    leads_context: Optional[str] = ""
 
 
 class ChatResponse(BaseModel):
@@ -86,7 +86,11 @@ def health():
 @app.post("/chat", response_model=ChatResponse)
 def chat(request: ChatRequest):
     try:
-        messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+        system_prompt = BASE_SYSTEM_PROMPT
+        if request.leads_context:
+            system_prompt += request.leads_context
+
+        messages = [{"role": "system", "content": system_prompt}]
 
         for msg in (request.history or [])[-10:]:
             messages.append({"role": msg.role, "content": msg.content})
@@ -101,7 +105,6 @@ def chat(request: ChatRequest):
         )
 
         reply = response.choices[0].message.content
-
         return ChatResponse(reply=reply, model="llama-3.3-70b-versatile")
 
     except Exception as e:
